@@ -21,14 +21,9 @@ static PyObject *cjpeg(PyObject *self, PyObject *args)
   struct jpeg_compress_struct cinfo;
   struct jpeg_decompress_struct dinfo;
   struct jpeg_error_mgr jerr;
-  int file_index;
-  cjpeg_source_ptr src_mgr;
-  FILE *input_file;
-  FILE *output_file = NULL;
   unsigned char *outbuffer = NULL;
   unsigned long outsize = 0;
   JSAMPARRAY buffer;
-  JDIMENSION num_scanlines;
   int row_stride;
 
   if (!PyArg_ParseTuple(args, "s#", &input_data, &input_data_size))
@@ -90,9 +85,9 @@ static PyMethodDef pymozjpeg_methods[] = {
 //-----------------------------------------------------------------------------
 #if PY_MAJOR_VERSION < 3
 
-PyMODINIT_FUNC initpymozjpeg(void)
+PyMODINIT_FUNC init_pymozjpeg(void)
 {
-  (void) Py_InitModule("pymozjpeg", pymozjpeg_methods);
+  (void) Py_InitModule("_pymozjpeg", pymozjpeg_methods);
 }
 
 #else /* PY_MAJOR_VERSION >= 3 */
@@ -100,12 +95,12 @@ PyMODINIT_FUNC initpymozjpeg(void)
 static struct PyModuleDef pymozjpeg_module_def = {
   PyModuleDef_HEAD_INIT,
   "_pymozjpeg",
-  "\"pymozjpeg\" module",
+  "\"_pymozjpeg\" module",
   -1,
   pymozjpeg_methods
 };
 
-PyMODINIT_FUNC PyInit_pymozjpeg(void)
+PyMODINIT_FUNC PyInit__pymozjpeg(void)
 {
   return PyModule_Create(&pymozjpeg_module_def);
 }
