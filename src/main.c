@@ -177,10 +177,8 @@ static PyObject* cjpeg(PyObject *self, PyObject *args)
 
   if (PyBool_Check(fast_encoding)) {
       jpeg_c_set_int_param(&cinfo, JINT_COMPRESS_PROFILE, JCP_FASTEST);
-      jpeg_set_defaults(&cinfo);
   } else {
-      cinfo.optimize_coding = TRUE;
-      jpeg_c_set_bool_param(&cinfo, JBOOLEAN_OPTIMIZE_SCANS, TRUE);
+      jpeg_c_set_int_param(&cinfo, JINT_COMPRESS_PROFILE, JCP_MAX_COMPRESSION);
   }
 
   jpeg_set_quality(&cinfo, quality, TRUE);
