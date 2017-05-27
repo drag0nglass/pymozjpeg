@@ -175,7 +175,7 @@ static PyObject* cjpeg(PyObject *self, PyObject *args)
   cinfo.in_color_space = JCS_RGB;
   jpeg_set_defaults(&cinfo);
 
-  if (PyBool_Check(fast_encoding)) {
+  if (PyObject_IsTrue(fast_encoding)) {
       jpeg_c_set_int_param(&cinfo, JINT_COMPRESS_PROFILE, JCP_FASTEST);
   } else {
       jpeg_c_set_int_param(&cinfo, JINT_COMPRESS_PROFILE, JCP_MAX_COMPRESSION);
