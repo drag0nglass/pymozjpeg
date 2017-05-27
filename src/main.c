@@ -151,7 +151,7 @@ static PyObject* cjpeg(PyObject *self, PyObject *args)
   int quality = 75;
   PyObject* fast_encoding = Py_True;
 
-  if (!PyArg_ParseTuple(args, "s#|io", &input_data, &input_data_size, &quality, &fast_encoding))
+  if (!PyArg_ParseTuple(args, "s#|iO", &input_data, &input_data_size, &quality, &fast_encoding))
     return NULL;
 
   dinfo.err = cinfo.err = jpeg_std_error(&jerr);
