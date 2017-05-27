@@ -1,4 +1,6 @@
 *.pyc
 /dist/
 /build/
+/mozjpeg/
+mozjpeg.tar.gz
 /*.egg-info

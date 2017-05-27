@@ -149,8 +149,9 @@ static PyObject* cjpeg(PyObject *self, PyObject *args)
   JSAMPARRAY buffer;
   int row_stride;
   int quality = 75;
+  PyObject* fast_encoding = Py_True;
 
-  if (!PyArg_ParseTuple(args, "s#|i", &input_data, &input_data_size, &quality))
+  if (!PyArg_ParseTuple(args, "s#|io", &input_data, &input_data_size, &quality, &fast_encoding))
     return NULL;
 
   dinfo.err = cinfo.err = jpeg_std_error(&jerr);
@@ -168,14 +169,21 @@ static PyObject* cjpeg(PyObject *self, PyObject *args)
 
   cinfo.image_width = dinfo.image_width;
   cinfo.image_height = dinfo.image_height;
-  cinfo.input_components = 3;
+  cinfo.input_components = dinfo.output_components;
+  cinfo.input_gamma = dinfo.output_gamma;
+
   cinfo.in_color_space = JCS_RGB;
-
-  jpeg_set_quality(&cinfo, quality, TRUE);
-
-  jpeg_c_set_int_param(&cinfo, JINT_COMPRESS_PROFILE, JCP_FASTEST);
   jpeg_set_defaults(&cinfo);
 
+  if (PyBool_Check(fast_encoding)) {
+      jpeg_c_set_int_param(&cinfo, JINT_COMPRESS_PROFILE, JCP_FASTEST);
+      jpeg_set_defaults(&cinfo);
+  } else {
+      cinfo.optimize_coding = TRUE;
+      jpeg_c_set_bool_param(&cinfo, JBOOLEAN_OPTIMIZE_SCANS, TRUE);
+  }
+
+  jpeg_set_quality(&cinfo, quality, TRUE);
   jpeg_start_compress(&cinfo, TRUE);
 
   row_stride = cinfo.image_width * cinfo.input_components;
