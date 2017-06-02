@@ -4,19 +4,41 @@
 #include "cdjpeg.h"
 #include "jversion.h"
 #include "jconfigint.h"
+#include <setjmp.h>
 
+typedef struct _error_mgr {
+  struct jpeg_error_mgr pub;
+  jmp_buf jb;
+} error_mgr;
 
-static const char * const cdjpeg_message_table[] = {
-#include "cderror.h"
-  NULL
-};
+static void error_emit_exception(j_common_ptr cinfo)
+{
+  error_mgr *myerr = (error_mgr *)cinfo->err;
+  longjmp(myerr->jb, 1);
+}
 
+void my_emit_message (j_common_ptr cinfo, int msg_level)
+{
+
+}
+
+GLOBAL(struct jpeg_error_mgr *)
+pymozjpeg_error(error_mgr *err) 
+{
+  jpeg_std_error((struct jpeg_error_mgr *)err);
+  err->pub.trace_level = 0;
+  err->pub.error_exit = error_emit_exception;
+
+  return (struct jpeg_error_mgr *)err;
+}
+ 
+/* Code from ImageMagik library */
 static PyObject* get_jpeg_quality(PyObject *self, PyObject *args)
 {
     const unsigned char *input_data;
     unsigned long input_data_size;
     struct jpeg_decompress_struct dinfo;
-    struct jpeg_error_mgr jerr;
+    error_mgr jerr;
     int quality = 0;
 
     ssize_t j, qvalue, sum;
@@ -25,7 +47,15 @@ static PyObject* get_jpeg_quality(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "s#", &input_data, &input_data_size))
       return NULL;
 
-    dinfo.err = jpeg_std_error(&jerr);
+    dinfo.err = pymozjpeg_error(&jerr);
+    dinfo.global_state = 0;
+
+    if(setjmp(jerr.jb)) {
+      PyErr_SetString(PyExc_ValueError, jerr.pub.jpeg_message_table[jerr.pub.last_jpeg_message]);
+      if (dinfo.global_state != 0)
+        jpeg_destroy_decompress(&dinfo);
+      return NULL;
+    }
 
     jpeg_create_decompress(&dinfo);
     jpeg_mem_src(&dinfo, input_data, input_data_size);
@@ -132,6 +162,7 @@ static PyObject* get_jpeg_quality(PyObject *self, PyObject *args)
           }
         }
 
+    jpeg_destroy_decompress(&dinfo);
 
     return Py_BuildValue("i", quality);
 }
@@ -143,39 +174,60 @@ static PyObject* cjpeg(PyObject *self, PyObject *args)
 
   struct jpeg_compress_struct cinfo;
   struct jpeg_decompress_struct dinfo;
-  struct jpeg_error_mgr jerr;
+  error_mgr jerr;
   unsigned char *outbuffer = NULL;
   unsigned long outsize = 0;
   JSAMPARRAY buffer;
   int row_stride;
   int quality = 75;
-  PyObject* fast_encoding = Py_True;
+  int fast_encoding = 1;
 
-  if (!PyArg_ParseTuple(args, "s#|iO", &input_data, &input_data_size, &quality, &fast_encoding))
+  if (!PyArg_ParseTuple(args, "s#|ii", &input_data, &input_data_size, &quality, &fast_encoding))
     return NULL;
 
-  dinfo.err = cinfo.err = jpeg_std_error(&jerr);
-  jerr.addon_message_table = cdjpeg_message_table; 
-  jerr.first_addon_message = JMSG_FIRSTADDONCODE;
-  jerr.last_addon_message = JMSG_LASTADDONCODE;
+  if (input_data_size < 134) {
+    PyErr_SetString(PyExc_ValueError, "Not enough data");
+    return NULL;
+  }
+
+  dinfo.global_state = cinfo.global_state = 0;
+  dinfo.err = cinfo.err = pymozjpeg_error(&jerr);
+
+  if(setjmp(jerr.jb)) {
+    PyErr_SetString(PyExc_ValueError, jerr.pub.jpeg_message_table[jerr.pub.last_jpeg_message]);
+    if (dinfo.global_state != 0)
+      jpeg_destroy_decompress(&dinfo);
+    if (cinfo.global_state != 0)
+      jpeg_destroy_compress(&cinfo);
+    return NULL;
+  }
 
   jpeg_create_decompress(&dinfo);
   jpeg_mem_src(&dinfo, input_data, input_data_size);
+
+  jpeg_save_markers(&dinfo, JPEG_COM, 0xFFFF);
+  
+  for (int m = 0; m < 16; m++)
+    jpeg_save_markers(&dinfo, JPEG_APP0 + m, 0xFFFF);
+
   jpeg_read_header(&dinfo, TRUE);
+
+  dinfo.raw_data_out = FALSE;
   jpeg_start_decompress(&dinfo);
 
   jpeg_create_compress(&cinfo);
-  jpeg_mem_dest(&cinfo, &outbuffer, &outsize);
 
+  cinfo.in_color_space = dinfo.out_color_space;
+  cinfo.input_components = dinfo.output_components;
+  cinfo.data_precision = dinfo.data_precision;
   cinfo.image_width = dinfo.image_width;
   cinfo.image_height = dinfo.image_height;
-  cinfo.input_components = dinfo.output_components;
-  cinfo.input_gamma = dinfo.output_gamma;
 
-  cinfo.in_color_space = JCS_RGB;
+  cinfo.raw_data_in = FALSE;
+
   jpeg_set_defaults(&cinfo);
 
-  if (PyObject_IsTrue(fast_encoding)) {
+  if (fast_encoding) {
       jpeg_c_set_int_param(&cinfo, JINT_COMPRESS_PROFILE, JCP_FASTEST);
       jpeg_set_defaults(&cinfo);
   } else {
@@ -183,14 +235,15 @@ static PyObject* cjpeg(PyObject *self, PyObject *args)
   }
 
   jpeg_set_quality(&cinfo, quality, TRUE);
+  
+  jpeg_mem_dest(&cinfo, &outbuffer, &outsize);
   jpeg_start_compress(&cinfo, TRUE);
 
-  row_stride = cinfo.image_width * cinfo.input_components;
+  row_stride = dinfo.image_width * dinfo.output_components;
   buffer = (*dinfo.mem->alloc_sarray)((j_common_ptr) &dinfo, JPOOL_IMAGE, row_stride, 1);
-  while(cinfo.next_scanline < cinfo.image_height) {
-    
-    jpeg_read_scanlines(&dinfo, buffer, 1);
-    jpeg_write_scanlines(&cinfo, buffer, 1);
+  while(dinfo.output_scanline < dinfo.output_height) {
+    JDIMENSION num_scanlines = jpeg_read_scanlines(&dinfo, buffer, 1);
+    jpeg_write_scanlines(&cinfo, buffer, num_scanlines);
   }
 
   jpeg_finish_decompress(&dinfo);
